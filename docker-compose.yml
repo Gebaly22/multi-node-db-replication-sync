@@ -1,0 +1,68 @@
+x-db-environment: &db-environment
+  CONTAINER_DB_HOST: postgres-db
+  CONTAINER_DB_USER: ${CONTAINER_DB_USER:-admin}
+  CONTAINER_DB_PASSWORD: ${CONTAINER_DB_PASSWORD:?Set CONTAINER_DB_PASSWORD in .env}
+  CONTAINER_DB_NAME: ${CONTAINER_DB_NAME:-employeesdb}
+  VM_DB_HOST: ${VM_DB_HOST:-192.168.56.10}
+  VM_DB_USER: ${VM_DB_USER:-admin}
+  VM_DB_PASSWORD: ${VM_DB_PASSWORD:?Set VM_DB_PASSWORD in .env}
+  VM_DB_NAME: ${VM_DB_NAME:-employeesdb}
+  SQL_DB_HOST: ${SQL_DB_HOST:-192.168.56.1}
+  SQL_DB_USER: ${SQL_DB_USER:-docker_user}
+  SQL_DB_PASSWORD: ${SQL_DB_PASSWORD:?Set SQL_DB_PASSWORD in .env}
+  SQL_DB_NAME: ${SQL_DB_NAME:-employeesdb}
+
+services:
+  postgres-db:
+    image: postgres:16
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ${CONTAINER_DB_USER:-admin}
+      POSTGRES_PASSWORD: ${CONTAINER_DB_PASSWORD:?Set CONTAINER_DB_PASSWORD in .env}
+      POSTGRES_DB: ${CONTAINER_DB_NAME:-employeesdb}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      employee-net:
+        ipv4_address: 172.20.0.10
+
+  dockerwebapp:
+    build: ./dockerwebapp
+    environment: *db-environment
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks: [employee-net]
+
+  nginx-proxy:
+    build: ./nginx-proxy
+    ports: ["80:80"]
+    depends_on: [dockerwebapp]
+    networks: [employee-net]
+
+  sync-service:
+    profiles: [sync]
+    build: ./sync-service
+    environment: *db-environment
+    ports: ["4000:4000"]
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks: [employee-net]
+
+networks:
+  employee-net:
+    name: employee-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+volumes:
+  postgres-data:
